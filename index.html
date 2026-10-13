@@ -51,7 +51,10 @@
     .oculto { display: none !important; }
 
     /* Cámara */
-    #reader { width: 100%; margin-top: 8px; border-radius: 12px; overflow: hidden; background: #000; }
+    #reader { position: relative; width: 100%; margin-top: 8px; border-radius: 12px; overflow: hidden; background: #000; }
+    #reader video { display: block; width: 100% !important; height: 52vh !important; object-fit: cover; }
+    #reader .marco { position: absolute; top: 50%; left: 50%; width: 62%; aspect-ratio: 1; transform: translate(-50%, -50%);
+                     border: 3px solid #ffc107; border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,.35); pointer-events: none; }
     #reader:empty { display: none; }
     .zoom { display: flex; gap: 6px; margin-top: 6px; }
     .zoom button { min-height: 44px; font-size: 16px; margin-top: 0; background: #eee; color: #111; }
@@ -120,7 +123,7 @@
       <p>Operario: <b id="nombreOperario">-</b> · <a href="#" onclick="pedirOperario();return false;">cambiar</a></p>
     </div>
     <div style="text-align:right">
-      <span id="estadoRed" class="red">En línea</span><br>
+      <span id="estadoRed" class="red">En línea</span><br><small style="color:#999;font-size:11px">versión 3</small><br>
       <button id="btnPendientes" class="badge" onclick="sincronizarPendientes(true)">0 pendientes</button>
     </div>
   </div>
@@ -372,6 +375,7 @@
   // (salvo que haya una lectura a medio cargar)
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      if (iniciando) return;
       reanudarAlVolver = scannerActivo;
       detenerScanner();
     } else if (reanudarAlVolver && !hayDatosCargados()) {
@@ -389,71 +393,148 @@
   }
 
   // ================== Cámara en vivo ==================
-  function iniciarScanner(automatico) {
-    if (scannerActivo) return;
-    resaltarFoto(false);
-    if (typeof Html5Qrcode === 'undefined') {
-      mostrarMensaje('No cargó el lector de QR. Revise la conexión o use 📸 FOTO.', 'error'); return;
-    }
-    if (!scanner) {
-      scanner = new Html5Qrcode('reader', {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        // Usa el lector nativo de Android/Chrome si existe: mucho mejor con QR chicos
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-        verbose: false
-      });
-    }
+  // Modo principal: video propio + lector de QR nativo del teléfono (BarcodeDetector, Android/Chrome).
+  // Respaldo: librería html5-qrcode, para navegadores sin lector nativo.
+  let stream = null, track = null, detector = null, bucle = null;
+  let iniciando = false, modoCamara = null;
 
+  async function iniciarScanner(automatico) {
+    if (scannerActivo || iniciando) return;
+    iniciando = true;
+    resaltarFoto(false);
     lecturaEnCurso = false;
     document.getElementById('controlesCamara').classList.remove('oculto');
     document.getElementById('btnCamara').classList.add('oculto');
+    document.getElementById('zoom').classList.add('oculto');
+    document.getElementById('btnLinterna').classList.add('oculto');
     mostrarMensaje('Iniciando cámara...', 'info');
 
-    scanner.start(
-      { facingMode: 'environment' },
-      {
-        fps: 15,
-        qrbox: (w, h) => { const l = Math.floor(Math.min(w, h) * 0.8); return { width: l, height: l }; },
-        // Más resolución = el QR chico tiene más píxeles para leer
-        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
-      },
-      texto => alLeerQR(texto, 'QR CAMARA'),
-      () => {}
-    )
-    .then(() => {
+    const vigia = setTimeout(() => {
+      if (iniciando) mostrarMensaje(document.getElementById('mensaje').innerText + ' — Está tardando: toque DETENER y vuelva a intentar, o use 📸 FOTO.', 'warn');
+    }, 8000);
+
+    try {
+      mostrarMensaje('Iniciando cámara... (paso 1 de 3)', 'info');
+      const nativo = await conTiempo(hayDetectorNativo(), 2500, false);
+      if (nativo) await iniciarCamaraPropia();
+      else { mostrarMensaje('Iniciando cámara... (paso 2 de 3, modo compatible)', 'info'); await iniciarCamaraLibreria(); }
+
       scannerActivo = true;
-      configurarCapacidades();
+      try { configurarCapacidades(); } catch (e) {}
       mostrarMensaje('Apunte al QR de la etiqueta.', 'info');
       document.getElementById('reader').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    })
-    .catch(err => {
-      scannerActivo = false;
+    } catch (err) {
+      await liberarCamara();
       ocultarCamara();
-      const t = String(err);
       resaltarFoto(true);
-      if (automatico) {
-        mostrarMensaje('La cámara en vivo no está habilitada en este teléfono. Toque 📸 LEER QR CON FOTO.', 'warn');
-      } else if (/NotAllowed|Permission/i.test(t)) {
+      const t = String(err && err.name ? err.name + ' ' + err.message : err);
+      if (/NotAllowed|Permission/i.test(t)) {
         mostrarMensaje('La cámara está bloqueada. Use 📸 LEER QR CON FOTO o habilite el permiso.', 'error');
-        mostrarModalPermiso('bloqueado');
-      } else if (/NotReadable/i.test(t)) {
-        mostrarMensaje('La cámara está en uso por otra app. Ciérrela o use 📸 FOTO.', 'error');
+        if (!automatico) mostrarModalPermiso('bloqueado');
+      } else if (/NotReadable|TrackStart/i.test(t)) {
+        mostrarMensaje('La cámara está en uso por otra app. Ciérrela y toque 📷 ESCANEAR QR.', 'error');
+      } else if (/NotFound|Overconstrained/i.test(t)) {
+        mostrarMensaje('No se encontró una cámara compatible. Use 📸 LEER QR CON FOTO.', 'error');
       } else {
-        mostrarMensaje('No se pudo iniciar la cámara. Use 📸 LEER QR CON FOTO.', 'error');
+        mostrarMensaje('No se pudo iniciar la cámara (' + t + '). Use 📸 LEER QR CON FOTO.', 'error');
       }
+    } finally {
+      clearTimeout(vigia);
+      iniciando = false;
+    }
+  }
+
+  // Espera una promesa, pero no más de "ms": si tarda, sigue con el valor por defecto
+  function conTiempo(promesa, ms, porDefecto) {
+    return Promise.race([promesa, new Promise(r => setTimeout(() => r(porDefecto), ms))]);
+  }
+
+  async function hayDetectorNativo() {
+    if (!('BarcodeDetector' in window)) return false;
+    try {
+      const formatos = await BarcodeDetector.getSupportedFormats();
+      return formatos.indexOf('qr_code') > -1;
+    } catch (e) { return false; }
+  }
+
+  async function iniciarCamaraPropia() {
+    modoCamara = 'propia';
+    mostrarMensaje('Iniciando cámara... (paso 2 de 3)', 'info');
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    track = stream.getVideoTracks()[0];
+
+    const cont = document.getElementById('reader');
+    cont.innerHTML = '';
+    const video = document.createElement('video');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
+    video.muted = true;
+    video.autoplay = true;
+    video.srcObject = stream;
+    const marco = document.createElement('div');
+    marco.className = 'marco';
+    cont.appendChild(video);
+    cont.appendChild(marco);
+    mostrarMensaje('Iniciando cámara... (paso 3 de 3)', 'info');
+    // En algunos Android play() tarda en responder aunque el video ya se ve: no esperar más de 3 s
+    await conTiempo(video.play().catch(() => {}), 3000, null);
+
+    detector = new BarcodeDetector({ formats: ['qr_code'] });
+    const buscar = async () => {
+      if (modoCamara !== 'propia' || !stream) return;
+      try {
+        if (video.readyState >= 2) {
+          const res = await detector.detect(video);
+          for (const r of res) {
+            if (alLeerQR(r.rawValue, 'QR CAMARA')) return;
+          }
+        }
+      } catch (e) {}
+      bucle = setTimeout(buscar, 120);
+    };
+    buscar();
+  }
+
+  function iniciarCamaraLibreria() {
+    if (typeof Html5Qrcode === 'undefined') return Promise.reject('No cargó el lector de QR');
+    modoCamara = 'libreria';
+    if (!scanner) {
+      scanner = new Html5Qrcode('reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        verbose: false
+      });
+    }
+    return scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 12,
+        qrbox: (w, h) => { const l = Math.floor(Math.min(w, h) * 0.8); return { width: l, height: l }; },
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      },
+      texto => { alLeerQR(texto, 'QR CAMARA'); },
+      () => {}
+    ).then(() => {
+      const v = document.querySelector('#reader video');
+      track = (v && v.srcObject && v.srcObject.getVideoTracks) ? v.srcObject.getVideoTracks()[0] : null;
     });
   }
 
   // Muestra zoom y linterna solo si el teléfono los soporta
   function configurarCapacidades() {
     let caps = {};
-    try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) {}
+    try { caps = (track && track.getCapabilities) ? track.getCapabilities() : {}; } catch (e) {}
 
-    try { scanner.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {}); } catch (e) {}
+    if (caps.focusMode && caps.focusMode.indexOf('continuous') > -1) {
+      track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+    }
 
-    document.getElementById('btnLinterna').classList.toggle('oculto', !caps.torch);
     linternaEncendida = false;
-    document.getElementById('btnLinterna').innerText = '🔦 LUZ';
+    const btnLuz = document.getElementById('btnLinterna');
+    btnLuz.innerText = '🔦 LUZ';
+    btnLuz.classList.toggle('oculto', !caps.torch);
 
     const cont = document.getElementById('zoom');
     cont.innerHTML = '';
@@ -474,14 +555,14 @@
   }
 
   function aplicarZoom(z) {
-    if (!scannerActivo) return;
-    scanner.applyVideoConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
+    if (!track) return;
+    track.applyConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
     document.querySelectorAll('#zoom button').forEach(b => b.classList.toggle('activo', Number(b.dataset.z) === z));
   }
 
   function alternarLinterna() {
-    if (!scannerActivo) return;
-    scanner.applyVideoConstraints({ advanced: [{ torch: !linternaEncendida }] })
+    if (!track) return;
+    track.applyConstraints({ advanced: [{ torch: !linternaEncendida }] })
       .then(() => {
         linternaEncendida = !linternaEncendida;
         document.getElementById('btnLinterna').innerText = linternaEncendida ? '🔦 APAGAR' : '🔦 LUZ';
@@ -489,9 +570,20 @@
       .catch(() => mostrarMensaje('Este teléfono no permite usar la linterna desde el navegador.', 'warn'));
   }
 
-  function detenerScanner() {
-    if (!scanner || !scannerActivo) { ocultarCamara(); return Promise.resolve(); }
-    return scanner.stop().catch(() => {}).then(() => { scannerActivo = false; ocultarCamara(); });
+  async function liberarCamara() {
+    clearTimeout(bucle); bucle = null;
+    if (modoCamara === 'libreria' && scanner) {
+      try { await scanner.stop(); } catch (e) {}
+    }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (modoCamara === 'propia') document.getElementById('reader').innerHTML = '';
+    track = null; detector = null; modoCamara = null;
+    scannerActivo = false; linternaEncendida = false;
+  }
+
+  async function detenerScanner() {
+    await liberarCamara();
+    ocultarCamara();
   }
 
   function ocultarCamara() {
@@ -500,14 +592,15 @@
   }
 
   function alLeerQR(texto, origen) {
-    if (lecturaEnCurso) return;
+    if (lecturaEnCurso) return true;
     const datos = parsearQR(texto);
-    if (!esQRValido(datos)) return; // QR ajeno (otra etiqueta, publicidad): se sigue buscando
+    if (!esQRValido(datos)) return false; // QR ajeno (otra etiqueta, publicidad): se sigue buscando
     lecturaEnCurso = true;
     avisoLectura();
     detenerScanner();
     ultimaLecturaFueCamara = true;
     cargarDatosQR(texto, datos, origen);
+    return true;
   }
 
   // ================== Lectura desde foto ==================

@@ -1,6 +1,6 @@
 // Guarda la app en el teléfono para que abra aunque no haya señal.
 // Al publicar cambios, subir el número de versión para que los teléfonos se actualicen.
-const VERSION = 'qr-rfid-v2';
+const VERSION = 'qr-rfid-v3';
 const ARCHIVOS = [
   './',
   './index.html',
