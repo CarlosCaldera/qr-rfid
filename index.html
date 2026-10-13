@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1c45d8">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Lectura QR RFID</title>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; font-family: Arial, Helvetica, sans-serif; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: #fff; color: #111; }
+    body { padding-bottom: 92px; }
+    .app { width: 100%; max-width: 560px; margin: 0 auto; padding: 10px 12px; }
+
+    /* Encabezado */
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .header h1 { font-size: 21px; margin: 0; font-weight: 900; }
+    .header p  { font-size: 13px; margin: 2px 0 0; color: #666; }
+    .red { font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 10px; background: #e8f8ee; color: #007a33; }
+    .red.offline { background: #fdeaea; color: #c00000; }
+    .badge { display: none; background: #ff9800; color: #fff; border: none; border-radius: 20px; padding: 7px 11px;
+             font-size: 13px; font-weight: bold; width: auto; min-height: 0; margin: 6px 0 0; }
+    .badge.visible { display: inline-block; }
+
+    /* Botones */
+    button { width: 100%; min-height: 56px; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; margin-top: 8px; cursor: pointer; }
+    button:active { transform: scale(0.98); }
+    button:disabled { background: #bbb !important; color: #fff; }
+    .btn-azul  { background: #1c45d8; color: #fff; }
+    .btn-verde { background: #008844; color: #fff; }
+    .btn-osc   { background: #444; color: #fff; }
+    .btn-gris  { background: #777; color: #fff; }
+    .btn-amar  { background: #ffc107; color: #111; }
+    .btn-borde { background: #fff; color: #1c45d8; border: 2px solid #1c45d8; }
+    .btn-borde.pulso { background: #1c45d8; color: #fff; animation: pulso 1.4s ease-in-out infinite; }
+    @keyframes pulso { 0%,100% { box-shadow: 0 0 0 0 rgba(28,69,216,.5); } 50% { box-shadow: 0 0 0 8px rgba(28,69,216,0); } }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+    .modal-caja { background: #fff; width: 100%; max-width: 560px; border-radius: 18px 18px 0 0;
+                  padding: 20px 16px calc(16px + env(safe-area-inset-bottom)); max-height: 92vh; overflow-y: auto; }
+    .modal-caja h2 { font-size: 22px; margin: 0 0 6px; text-align: center; }
+    .modal-caja p { font-size: 16px; color: #333; line-height: 1.4; margin: 8px 0; }
+    .pasos { font-size: 16px; line-height: 1.55; padding-left: 22px; margin: 6px 0; }
+    .icono-grande { font-size: 46px; text-align: center; }
+    .fila { display: flex; gap: 8px; }
+    .fila > * { flex: 1; }
+    .oculto { display: none !important; }
+
+    /* Cámara */
+    #reader { width: 100%; margin-top: 8px; border-radius: 12px; overflow: hidden; background: #000; }
+    #reader:empty { display: none; }
+    .zoom { display: flex; gap: 6px; margin-top: 6px; }
+    .zoom button { min-height: 44px; font-size: 16px; margin-top: 0; background: #eee; color: #111; }
+    .zoom button.activo { background: #1c45d8; color: #fff; }
+    .tip { font-size: 13px; color: #666; margin-top: 6px; text-align: center; }
+
+    /* Mensajes */
+    .estado { text-align: center; font-size: 16px; padding: 13px; margin-top: 10px; border-radius: 10px; font-weight: bold; }
+    .ok    { background: #e8f8ee; color: #007a33; }
+    .error { background: #fdeaea; color: #c00000; }
+    .warn  { background: #fff4e0; color: #a35b00; }
+    .info  { background: #eef2ff; color: #1c45d8; }
+
+    /* Formulario */
+    .card { border-top: 1px solid #ddd; padding: 6px 2px 10px; margin-top: 12px; }
+    .titulo { font-size: 12px; font-weight: bold; color: #666; margin-top: 12px; text-transform: uppercase; display: flex; justify-content: space-between; }
+    .titulo .fuente { color: #007a33; text-transform: none; }
+    input, textarea {
+      width: 100%; border: 2px solid #bbb; border-radius: 12px; font-size: 20px; padding: 0 14px;
+      margin-top: 5px; background: #fff; color: #111;
+    }
+    input { height: 54px; font-weight: bold; }
+    input.mayus { text-transform: uppercase; }
+    input.chapa { height: 64px; font-size: 28px; font-weight: 900; background: #e8f1ff; border-color: #1746d1; }
+    input.medida { height: 64px; font-size: 28px; }
+    input.leido { background: #effaf3; border-color: #3aa76d; }
+    input.chapa.leido { background: #e8f1ff; border-color: #1746d1; }
+    input.invalido { border-color: #c00000; background: #fff6f6; }
+    input:focus, textarea:focus { outline: none; border-color: #1c45d8; }
+    input::placeholder { font-size: 16px; color: #aaa; font-weight: normal; text-transform: none; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+    .grid-chapa { display: grid; grid-template-columns: 2fr 1fr; gap: 0 10px; }
+    .aviso { font-size: 13px; color: #a35b00; margin-top: 3px; min-height: 16px; }
+    .aviso.conv { color: #1c45d8; }
+    .m2 { background: #e8f1ff; border-left: 7px solid #1746d1; border-radius: 10px; padding: 12px; font-size: 30px;
+          font-weight: 900; margin-top: 6px; color: #003366; }
+
+    details { margin-top: 14px; border: 1px solid #ddd; border-radius: 12px; padding: 2px 12px 10px; }
+    summary { font-size: 15px; font-weight: bold; color: #444; padding: 10px 0; cursor: pointer; }
+    .qr { background: #f1f1f1; border-radius: 10px; padding: 10px; font-size: 14px; word-break: break-word; color: #555; }
+    textarea { min-height: 70px; padding-top: 10px; font-size: 15px; }
+
+    .hist-item { display: flex; justify-content: space-between; gap: 8px; padding: 9px 0; border-bottom: 1px solid #eee; font-size: 15px; }
+    .hist-item:last-child { border-bottom: none; }
+    .hist-item b { display: block; }
+    .hist-item small { color: #777; }
+    .tag { font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 8px; white-space: nowrap; align-self: center; }
+    .tag.ok { background: #e8f8ee; color: #007a33; }
+    .tag.rev { background: #fff4e0; color: #a35b00; }
+    .tag.pend { background: #ffe0b2; color: #8a4b00; }
+
+    .barra { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd;
+             padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 8px rgba(0,0,0,.08); }
+    .barra .contenido { max-width: 560px; margin: 0 auto; display: flex; gap: 8px; }
+    .barra button { margin-top: 0; }
+    .barra .btn-osc { flex: 0 0 30%; font-size: 15px; }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <div class="header">
+    <div>
+      <h1>📷 Lectura QR RFID</h1>
+      <p>Operario: <b id="nombreOperario">-</b> · <a href="#" onclick="pedirOperario();return false;">cambiar</a></p>
+    </div>
+    <div style="text-align:right">
+      <span id="estadoRed" class="red">En línea</span><br>
+      <button id="btnPendientes" class="badge" onclick="sincronizarPendientes(true)">0 pendientes</button>
+    </div>
+  </div>
+
+  <!-- ===== Escaneo ===== -->
+  <button id="btnCamara" class="btn-azul" onclick="iniciarScanner()">📷 ESCANEAR QR</button>
+  <div id="controlesCamara" class="oculto">
+    <div id="reader"></div>
+    <div id="zoom" class="zoom oculto"></div>
+    <div class="tip">Acerque el QR hasta que se vea nítido. Si es chico, use 2x o 3x.</div>
+    <div class="fila">
+      <button id="btnLinterna" class="btn-amar oculto" onclick="alternarLinterna()">🔦 LUZ</button>
+      <button class="btn-gris" onclick="detenerScanner()">DETENER</button>
+    </div>
+  </div>
+  <button id="btnFoto" class="btn-borde" onclick="document.getElementById('fotoQR').click()">📸 LEER QR CON FOTO</button>
+  <input type="file" id="fotoQR" accept="image/*" capture="environment" class="oculto" onchange="leerFotoQR(this)">
+  <div id="readerArchivo" class="oculto"></div>
+
+  <div id="mensaje" class="estado info">Escanee el QR o complete los datos a mano.</div>
+
+  <!-- ===== Datos (se llenan con el QR, o a mano) ===== -->
+  <div class="card">
+    <div class="grid-chapa">
+      <div>
+        <div class="titulo">Nro. de chapa</div>
+        <input id="nroChapa" class="chapa mayus" autocapitalize="characters" autocomplete="off"
+               placeholder="Ej: C1/1" oninput="alEditar(this)" onblur="verificarDuplicado()">
+      </div>
+      <div>
+        <div class="titulo">Centro</div>
+        <input id="centro" inputmode="numeric" autocomplete="off" placeholder="Ej: 20" oninput="alEditar(this)">
+      </div>
+    </div>
+
+    <div class="titulo">Lote</div>
+    <input id="lote" class="mayus" autocapitalize="characters" autocomplete="off"
+           placeholder="Ej: 19EQC0-10" oninput="alEditar(this)" onblur="verificarDuplicado()">
+
+    <div class="titulo">PC / Material</div>
+    <input id="pc" class="mayus" autocapitalize="characters" autocomplete="off"
+           placeholder="Ej: PC0211020W" oninput="alEditar(this)">
+
+    <div class="titulo">Descripción <span style="text-transform:none;font-weight:normal">(opcional)</span></div>
+    <input id="nombre" class="mayus" autocapitalize="characters" autocomplete="off"
+           placeholder="Ej: GTO. ROSA DEL SALTO" oninput="alEditar(this)" style="font-size:17px">
+
+    <div class="grid2">
+      <div>
+        <div class="titulo">Largo (m) <span class="fuente" id="fuenteLargo"></span></div>
+        <input id="largoM" class="medida" inputmode="decimal" autocomplete="off" placeholder="3,10"
+               oninput="alEditar(this)" onblur="normalizarMedida('largoM')"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('altoM').focus();}">
+        <div class="aviso" id="avisoLargo"></div>
+      </div>
+      <div>
+        <div class="titulo">Alto (m) <span class="fuente" id="fuenteAlto"></span></div>
+        <input id="altoM" class="medida" inputmode="decimal" autocomplete="off" placeholder="1,45"
+               oninput="alEditar(this)" onblur="normalizarMedida('altoM')"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+        <div class="aviso" id="avisoAlto"></div>
+      </div>
+    </div>
+    <div class="tip" style="text-align:left">Puede escribir 3,10 · 310 (cm) · 3100 (mm): se convierte solo.</div>
+
+    <div class="titulo">M² calculado</div>
+    <div class="m2" id="m2">0,000 m²</div>
+
+    <details>
+      <summary>Texto del QR leído</summary>
+      <div class="qr" id="qrCompleto">-</div>
+      <textarea id="qrManual" placeholder="O pegue acá el texto de un QR y toque PROCESAR"></textarea>
+      <button class="btn-gris" onclick="procesarManual()">PROCESAR TEXTO</button>
+    </details>
+
+    <details open>
+      <summary>Últimas lecturas de este equipo</summary>
+      <div id="historial"></div>
+    </details>
+  </div>
+</div>
+
+<!-- Ventana para pedir / explicar el permiso de cámara -->
+<div id="modalCamara" class="modal oculto">
+  <div class="modal-caja">
+    <div class="icono-grande">📷</div>
+    <h2 id="modalTitulo"></h2>
+    <div id="modalTexto"></div>
+    <button id="modalBtnPrincipal" class="btn-azul"></button>
+    <button class="btn-borde" onclick="usarFotoDesdeModal()">📸 USAR FOTO EN SU LUGAR</button>
+  </div>
+</div>
+
+<!-- Nombre del operario (se pide una sola vez por teléfono) -->
+<div id="modalOperario" class="modal oculto">
+  <div class="modal-caja">
+    <div class="icono-grande">👷</div>
+    <h2>¿Quién está escaneando?</h2>
+    <p>Escriba su nombre. Queda guardado en este teléfono y aparece en la planilla en cada lectura.</p>
+    <input id="inputOperario" autocomplete="name" placeholder="Nombre y apellido"
+           onkeydown="if(event.key==='Enter'){guardarOperario();}">
+    <button class="btn-azul" onclick="guardarOperario()">CONTINUAR</button>
+  </div>
+</div>
+
+<div class="barra">
+  <div class="contenido">
+    <button class="btn-osc" onclick="reiniciar()">NUEVA</button>
+    <button id="btnGuardar" class="btn-verde" onclick="guardar()" disabled>GUARDAR</button>
+  </div>
+</div>
+
+<script>
+  // ================== Configuración ==================
+  const MEDIDA_MAX_NORMAL = 4.5;
+  const MEDIDA_MAX_ABSOLUTA = 20;
+  const ZOOM_INICIAL = 2;              // los QR de las etiquetas son chicos
+  const CLAVE_PENDIENTES = 'qrRfid_pendientes';
+  const CLAVE_HISTORIAL  = 'qrRfid_historial';
+  const CAMPOS = ['nroChapa', 'centro', 'lote', 'pc', 'nombre'];
+  const CLAVE_OPERARIO = 'qrRfid_operario';
+
+  // ===== CONEXIÓN CON LA PLANILLA (completar) =====
+  // URL de la implementación de Apps Script (termina en /exec)
+  const API_URL = 'PEGAR_AQUI_LA_URL_EXEC';
+  // Debe ser igual a API_TOKEN en Código.gs
+  const API_TOKEN = 'rfid-Kq7pX2mWv9Lz4Tn8';
+
+  // ================== Estado ==================
+  let scanner = null, lectorArchivo = null;
+  let scannerActivo = false, lecturaEnCurso = false, linternaEncendida = false;
+  let guardando = false, sincronizando = false;
+  let qrActual = '';                    // texto completo del último QR
+  let origenDatos = 'MANUAL';           // QR CAMARA / QR FOTO / QR TEXTO / MANUAL
+  let medidasDelQR = false;
+  let ultimaLecturaFueCamara = false;
+
+  let reanudarAlVolver = false;
+
+  window.addEventListener('load', () => {
+    actualizarEstadoRed(); actualizarBadgePendientes(); renderHistorial(); sincronizarPendientes(false);
+    mostrarOperario();
+    if (!apiConfigurada()) {
+      mostrarMensaje('Falta configurar API_URL en index.html: las lecturas quedan guardadas en el teléfono.', 'error');
+    }
+    // Primero el nombre del operario; después la cámara (se abre sola si ya está permitida)
+    if (!obtenerOperario()) pedirOperario();
+    else setTimeout(verificarPermisoCamara, 400);
+  });
+
+  // ================== Permiso de cámara ==================
+  async function estadoPermisoCamara() {
+    try {
+      if (!navigator.permissions) return 'desconocido';
+      const p = await navigator.permissions.query({ name: 'camera' });
+      return p.state; // 'granted' | 'prompt' | 'denied'
+    } catch (e) { return 'desconocido'; }
+  }
+
+  async function verificarPermisoCamara() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      resaltarFoto(true);
+      mostrarMensaje('Este navegador no permite la cámara en vivo. Use 📸 LEER QR CON FOTO.', 'warn');
+      return;
+    }
+    const estado = await estadoPermisoCamara();
+    if (estado === 'granted') return iniciarScanner(true);
+    if (estado === 'denied') return mostrarModalPermiso('bloqueado');
+    mostrarModalPermiso('preguntar');
+  }
+
+  function mostrarModalPermiso(tipo) {
+    const titulo = document.getElementById('modalTitulo');
+    const texto = document.getElementById('modalTexto');
+    const btn = document.getElementById('modalBtnPrincipal');
+
+    if (tipo === 'preguntar') {
+      titulo.innerText = '¿Habilitar la cámara?';
+      texto.innerHTML =
+        '<p>Para escanear los QR más rápido, la app necesita usar la cámara del teléfono.</p>' +
+        '<p>Al tocar el botón, Chrome va a mostrar un aviso: elija <b>Permitir</b> (o <b>Al usar la app</b>).</p>';
+      btn.innerText = 'SÍ, HABILITAR CÁMARA';
+    } else if (tipo === 'bloqueado') {
+      titulo.innerText = 'La cámara está bloqueada';
+      texto.innerHTML =
+        '<p>Chrome tiene bloqueada la cámara para esta app y <b>no vuelve a preguntar solo</b>. Para habilitarla:</p>' +
+        '<ol class="pasos">' +
+        '<li>Toque el ícono que está a la <b>izquierda de la dirección</b> (arriba de todo).</li>' +
+        '<li>Entre en <b>Permisos</b> o <b>Configuración del sitio</b>.</li>' +
+        '<li>En <b>Cámara</b>, elija <b>Permitir</b>.</li>' +
+        '<li>Vuelva acá y toque el botón azul.</li>' +
+        '</ol>' +
+        '<p style="font-size:14px;color:#666">Si no aparece ahí: Chrome ⋮ → Configuración → Configuración de sitios → Cámara, y quite de "Bloqueados" script.google.com y googleusercontent.com.</p>';
+      btn.innerText = 'YA LO HABILITÉ, REINTENTAR';
+    } else {
+      titulo.innerText = 'Cámara en vivo no disponible';
+      texto.innerHTML =
+        '<p>El navegador no pudo abrir la cámara en vivo. Revise que Chrome tenga permiso de cámara en Ajustes de Android → Aplicaciones → Chrome → Permisos.</p>' +
+        '<p>Use <b>📸 FOTO</b>: abre la cámara normal del teléfono y lee el QR igual.</p>' +
+        '<p style="font-size:14px;color:#666">También puede probar actualizando Chrome desde Play Store.</p>';
+      btn.innerText = 'REINTENTAR';
+    }
+
+    btn.onclick = pedirPermisoCamara;
+    document.getElementById('modalCamara').classList.remove('oculto');
+  }
+
+  function cerrarModal() {
+    document.getElementById('modalCamara').classList.add('oculto');
+  }
+
+  // Se llama desde el toque en el botón: así Chrome sí muestra su aviso de permiso
+  async function pedirPermisoCamara() {
+    const inicio = Date.now();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      stream.getTracks().forEach(t => t.stop());
+      cerrarModal();
+      iniciarScanner(false);
+    } catch (err) {
+      const nombre = err && err.name;
+      const estado = await estadoPermisoCamara();
+      if (nombre === 'NotAllowedError') {
+        // Rechazo instantáneo sin que el permiso figure como bloqueado:
+        // el navegador no permite la cámara dentro del marco de Google
+        if (estado !== 'denied' && Date.now() - inicio < 400) mostrarModalPermiso('noDisponible');
+        else mostrarModalPermiso('bloqueado');
+      } else if (nombre === 'NotReadableError') {
+        cerrarModal();
+        mostrarMensaje('La cámara está en uso por otra app. Ciérrela y toque 📷 ESCANEAR QR.', 'error');
+      } else if (nombre === 'NotFoundError') {
+        cerrarModal(); resaltarFoto(true);
+        mostrarMensaje('No se encontró cámara. Use 📸 LEER QR CON FOTO.', 'error');
+      } else {
+        mostrarModalPermiso('noDisponible');
+      }
+    }
+  }
+
+  function usarFotoDesdeModal() {
+    cerrarModal();
+    resaltarFoto(true);
+    document.getElementById('fotoQR').click();
+  }
+  window.addEventListener('online',  () => { actualizarEstadoRed(); sincronizarPendientes(false); });
+  window.addEventListener('offline', actualizarEstadoRed);
+
+  // Al bloquear el teléfono o cambiar de app se apaga la cámara; al volver se reabre sola
+  // (salvo que haya una lectura a medio cargar)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      reanudarAlVolver = scannerActivo;
+      detenerScanner();
+    } else if (reanudarAlVolver && !hayDatosCargados()) {
+      reanudarAlVolver = false;
+      setTimeout(() => iniciarScanner(true), 400);
+    }
+  });
+
+  function hayDatosCargados() {
+    return CAMPOS.concat(['largoM', 'altoM']).some(id => document.getElementById(id).value.trim() !== '');
+  }
+
+  function resaltarFoto(si) {
+    document.getElementById('btnFoto').classList.toggle('pulso', !!si);
+  }
+
+  // ================== Cámara en vivo ==================
+  function iniciarScanner(automatico) {
+    if (scannerActivo) return;
+    resaltarFoto(false);
+    if (typeof Html5Qrcode === 'undefined') {
+      mostrarMensaje('No cargó el lector de QR. Revise la conexión o use 📸 FOTO.', 'error'); return;
+    }
+    if (!scanner) {
+      scanner = new Html5Qrcode('reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        // Usa el lector nativo de Android/Chrome si existe: mucho mejor con QR chicos
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+    }
+
+    lecturaEnCurso = false;
+    document.getElementById('controlesCamara').classList.remove('oculto');
+    document.getElementById('btnCamara').classList.add('oculto');
+    mostrarMensaje('Iniciando cámara...', 'info');
+
+    scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 15,
+        qrbox: (w, h) => { const l = Math.floor(Math.min(w, h) * 0.8); return { width: l, height: l }; },
+        // Más resolución = el QR chico tiene más píxeles para leer
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+      },
+      texto => alLeerQR(texto, 'QR CAMARA'),
+      () => {}
+    )
+    .then(() => {
+      scannerActivo = true;
+      configurarCapacidades();
+      mostrarMensaje('Apunte al QR de la etiqueta.', 'info');
+      document.getElementById('reader').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    })
+    .catch(err => {
+      scannerActivo = false;
+      ocultarCamara();
+      const t = String(err);
+      resaltarFoto(true);
+      if (automatico) {
+        mostrarMensaje('La cámara en vivo no está habilitada en este teléfono. Toque 📸 LEER QR CON FOTO.', 'warn');
+      } else if (/NotAllowed|Permission/i.test(t)) {
+        mostrarMensaje('La cámara está bloqueada. Use 📸 LEER QR CON FOTO o habilite el permiso.', 'error');
+        mostrarModalPermiso('bloqueado');
+      } else if (/NotReadable/i.test(t)) {
+        mostrarMensaje('La cámara está en uso por otra app. Ciérrela o use 📸 FOTO.', 'error');
+      } else {
+        mostrarMensaje('No se pudo iniciar la cámara. Use 📸 LEER QR CON FOTO.', 'error');
+      }
+    });
+  }
+
+  // Muestra zoom y linterna solo si el teléfono los soporta
+  function configurarCapacidades() {
+    let caps = {};
+    try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) {}
+
+    try { scanner.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {}); } catch (e) {}
+
+    document.getElementById('btnLinterna').classList.toggle('oculto', !caps.torch);
+    linternaEncendida = false;
+    document.getElementById('btnLinterna').innerText = '🔦 LUZ';
+
+    const cont = document.getElementById('zoom');
+    cont.innerHTML = '';
+    if (caps.zoom && caps.zoom.max > 1) {
+      const niveles = [1, 2, 3, 4].filter(z => z >= caps.zoom.min && z <= caps.zoom.max);
+      niveles.forEach(z => {
+        const b = document.createElement('button');
+        b.textContent = z + 'x';
+        b.onclick = () => aplicarZoom(z);
+        b.dataset.z = z;
+        cont.appendChild(b);
+      });
+      cont.classList.remove('oculto');
+      aplicarZoom(niveles.indexOf(ZOOM_INICIAL) > -1 ? ZOOM_INICIAL : niveles[niveles.length - 1]);
+    } else {
+      cont.classList.add('oculto');
+    }
+  }
+
+  function aplicarZoom(z) {
+    if (!scannerActivo) return;
+    scanner.applyVideoConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
+    document.querySelectorAll('#zoom button').forEach(b => b.classList.toggle('activo', Number(b.dataset.z) === z));
+  }
+
+  function alternarLinterna() {
+    if (!scannerActivo) return;
+    scanner.applyVideoConstraints({ advanced: [{ torch: !linternaEncendida }] })
+      .then(() => {
+        linternaEncendida = !linternaEncendida;
+        document.getElementById('btnLinterna').innerText = linternaEncendida ? '🔦 APAGAR' : '🔦 LUZ';
+      })
+      .catch(() => mostrarMensaje('Este teléfono no permite usar la linterna desde el navegador.', 'warn'));
+  }
+
+  function detenerScanner() {
+    if (!scanner || !scannerActivo) { ocultarCamara(); return Promise.resolve(); }
+    return scanner.stop().catch(() => {}).then(() => { scannerActivo = false; ocultarCamara(); });
+  }
+
+  function ocultarCamara() {
+    document.getElementById('controlesCamara').classList.add('oculto');
+    document.getElementById('btnCamara').classList.remove('oculto');
+  }
+
+  function alLeerQR(texto, origen) {
+    if (lecturaEnCurso) return;
+    const datos = parsearQR(texto);
+    if (!esQRValido(datos)) return; // QR ajeno (otra etiqueta, publicidad): se sigue buscando
+    lecturaEnCurso = true;
+    avisoLectura();
+    detenerScanner();
+    ultimaLecturaFueCamara = true;
+    cargarDatosQR(texto, datos, origen);
+  }
+
+  // ================== Lectura desde foto ==================
+  async function leerFotoQR(input) {
+    const archivo = input.files && input.files[0];
+    input.value = '';
+    if (!archivo) return;
+
+    await detenerScanner();
+    mostrarMensaje('Leyendo QR de la foto...', 'info');
+
+    try {
+      const texto = await decodificarImagen(archivo);
+      avisoLectura();
+      ultimaLecturaFueCamara = false;
+      cargarDatosQR(texto, parsearQR(texto), 'QR FOTO');
+    } catch (e) {
+      mostrarMensaje('No se encontró el QR en la foto. Sáquela más cerca (que el QR ocupe buena parte de la foto), derecha y sin reflejo. O complete los datos a mano.', 'error');
+    }
+  }
+
+  async function decodificarImagen(archivo) {
+    const img = await cargarImagen(archivo);
+
+    // 1) Lector nativo del teléfono (si existe). Puede ver varios QR: se elige el de la etiqueta.
+    if ('BarcodeDetector' in window) {
+      try {
+        const det = new BarcodeDetector({ formats: ['qr_code'] });
+        const res = await det.detect(img);
+        const valido = res.find(r => esQRValido(parsearQR(r.rawValue)));
+        if (valido) return valido.rawValue;
+        if (res.length) return res[0].rawValue;
+      } catch (e) {}
+    }
+
+    // 2) Lector de la librería, probando varios tamaños (las fotos grandes a veces fallan)
+    if (typeof Html5Qrcode === 'undefined') throw new Error('sin lector');
+    if (!lectorArchivo) lectorArchivo = new Html5Qrcode('readerArchivo', { verbose: false });
+
+    for (const lado of [1600, 1000, 2400, 700]) {
+      try {
+        const f = await redimensionar(img, lado);
+        return await lectorArchivo.scanFile(f, false);
+      } catch (e) {}
+    }
+    throw new Error('no encontrado');
+  }
+
+  function cargarImagen(archivo) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(archivo);
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  function redimensionar(img, ladoMax) {
+    return new Promise(resolve => {
+      const esc = Math.min(1, ladoMax / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * esc);
+      c.height = Math.round(img.naturalHeight * esc);
+      const ctx = c.getContext('2d');
+      ctx.filter = 'grayscale(1) contrast(1.4)';
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => resolve(new File([b], 'qr.jpg', { type: 'image/jpeg' })), 'image/jpeg', 0.92);
+    });
+  }
+
+  // ================== Interpretación del QR ==================
+  // Acepta separadores ; | o salto de línea, y claves con distintos nombres (PC, Lot, Lote, Nro, Largo, Alto...)
+  function parsearQR(texto) {
+    const r = {};
+    String(texto || '').split(/[;|\n\r]+/).forEach(parte => {
+      const m = parte.match(/^\s*([^:=]+?)\s*[:=]\s*(.*)$/);
+      if (!m) return;
+      const clave = normalizarClave(m[1]);
+      if (clave && !(clave in r)) r[clave] = m[2].trim();
+    });
+    return r;
+  }
+
+  function normalizarClave(k) {
+    k = k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+    if (k === 'pc' || k.startsWith('mat') || k.startsWith('cod')) return 'pc';
+    if (k.startsWith('nom') || k.startsWith('desc')) return 'nombre';
+    if (k.startsWith('lot')) return 'lote';
+    if (k.startsWith('ctr') || k.startsWith('cent')) return 'centro';
+    if (k.startsWith('nro') || k.startsWith('num') || k.startsWith('chap')) return 'nroChapa';
+    if (k.startsWith('larg') || k === 'lar' || k === 'l') return 'largo';
+    if (k.startsWith('alt') || k.startsWith('anch') || k === 'a') return 'alto';
+    return null;
+  }
+
+  function esQRValido(d) {
+    return !!(d.pc || d.lote || d.nroChapa);
+  }
+
+  function cargarDatosQR(texto, d, origen) {
+    if (!esQRValido(d)) {
+      document.getElementById('qrCompleto').innerText = texto || '-';
+      mostrarMensaje('Se leyó un QR, pero no tiene los datos esperados. Revise "Texto del QR leído" o complete a mano.', 'error');
+      return;
+    }
+
+    reiniciar(true);
+    qrActual = texto;
+    origenDatos = origen;
+    document.getElementById('qrCompleto').innerText = texto;
+
+    ponerCampo('nroChapa', d.nroChapa);
+    ponerCampo('centro', d.centro);
+    ponerCampo('lote', normalizarCodigo(d.lote));
+    ponerCampo('pc', d.pc);
+    ponerCampo('nombre', d.nombre);
+
+    // Si la etiqueta trae las medidas, se completan solas
+    const largo = d.largo ? interpretarMedida(d.largo, true) : null;
+    const alto  = d.alto  ? interpretarMedida(d.alto, true)  : null;
+    if (largo && largo.valor) { ponerCampo('largoM', formatear(largo.valor, 3)); document.getElementById('fuenteLargo').innerText = '✓ etiqueta'; }
+    if (alto && alto.valor)   { ponerCampo('altoM',  formatear(alto.valor, 3));  document.getElementById('fuenteAlto').innerText  = '✓ etiqueta'; }
+    medidasDelQR = !!(largo && largo.valor && alto && alto.valor);
+
+    actualizarFormulario();
+    verificarDuplicado();
+
+    if (medidasDelQR) {
+      mostrarMensaje('QR leído con medidas. Controle y toque GUARDAR.', 'ok');
+    } else {
+      mostrarMensaje('QR leído. Cargue largo y alto.', 'ok');
+      const campo = document.getElementById(largo && largo.valor ? 'altoM' : 'largoM');
+      setTimeout(() => { campo.focus(); campo.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
+    }
+  }
+
+  function procesarManual() {
+    const texto = document.getElementById('qrManual').value.trim();
+    if (!texto) { mostrarMensaje('Pegue el texto del QR.', 'error'); return; }
+    detenerScanner();
+    ultimaLecturaFueCamara = false;
+    cargarDatosQR(texto, parsearQR(texto), 'QR TEXTO');
+  }
+
+  // ================== Formulario ==================
+  function ponerCampo(id, valor) {
+    const el = document.getElementById(id);
+    el.value = valor || '';
+    el.classList.toggle('leido', !!valor);
+  }
+
+  function alEditar(el) {
+    el.classList.remove('leido');
+    if (el.id === 'largoM') document.getElementById('fuenteLargo').innerText = '';
+    if (el.id === 'altoM')  document.getElementById('fuenteAlto').innerText = '';
+    if (CAMPOS.indexOf(el.id) > -1 && qrActual) origenDatos = origenDatos.replace(/ \(EDITADO\)$/, '') + ' (EDITADO)';
+    if (!qrActual) origenDatos = 'MANUAL';
+    actualizarFormulario();
+  }
+
+  function valor(id) { return document.getElementById(id).value.trim().toUpperCase(); }
+
+  function normalizarCodigo(t) {
+    return String(t || '').toUpperCase().replace(/\s*([\/\-_])\s*/g, '$1').replace(/\s+/g, '');
+  }
+
+  // Interpreta 3,10 · 3.100 · 310 (cm) · 3100 (mm) · "3.100 m"
+  function interpretarMedida(txt, desdeQR) {
+    let s = String(txt || '').toLowerCase().trim();
+    if (!s) return null;
+    let unidad = '';
+    if (/mm/.test(s)) unidad = 'mm'; else if (/cm/.test(s)) unidad = 'cm';
+    s = s.replace(/[^0-9.,]/g, '');
+    if (!s) return { valor: NaN };
+
+    const tieneDecimal = /[.,]/.test(s);
+    let n = Number(s.replace(',', '.'));
+    if (isNaN(n)) return { valor: NaN };
+
+    let nota = '';
+    if (unidad === 'mm') { n = n / 1000; }
+    else if (unidad === 'cm') { n = n / 100; }
+    else if (!tieneDecimal && !desdeQR && n >= 1000) { n = n / 1000; nota = 'mm'; }
+    else if (!tieneDecimal && !desdeQR && n >= 100)  { n = n / 100;  nota = 'cm'; }
+    return { valor: n, nota: nota };
+  }
+
+  function validarMedida(id, idAviso) {
+    const el = document.getElementById(id);
+    const aviso = document.getElementById(idAviso);
+    const m = interpretarMedida(el.value, false);
+    aviso.innerText = ''; aviso.classList.remove('conv');
+
+    if (!m) { el.classList.remove('invalido'); return null; }
+    if (isNaN(m.valor) || m.valor <= 0) { el.classList.add('invalido'); aviso.innerText = 'Número inválido.'; return null; }
+    if (m.valor > MEDIDA_MAX_ABSOLUTA) { el.classList.add('invalido'); aviso.innerText = 'Valor fuera de rango.'; return null; }
+
+    el.classList.remove('invalido');
+    if (m.nota) { aviso.innerText = '= ' + formatear(m.valor, 3) + ' m (de ' + m.nota + ')'; aviso.classList.add('conv'); }
+    else if (m.valor > MEDIDA_MAX_NORMAL) aviso.innerText = 'Medida grande, verifique.';
+    return m.valor;
+  }
+
+  // Al salir del campo, muestra la medida ya convertida a metros
+  function normalizarMedida(id) {
+    const m = interpretarMedida(document.getElementById(id).value, false);
+    if (m && m.valor > 0 && m.valor <= MEDIDA_MAX_ABSOLUTA && m.nota) {
+      document.getElementById(id).value = formatear(m.valor, 3);
+      actualizarFormulario();
+    }
+  }
+
+  function actualizarFormulario() {
+    const largo = validarMedida('largoM', 'avisoLargo');
+    const alto  = validarMedida('altoM', 'avisoAlto');
+    document.getElementById('m2').innerText = (largo && alto ? formatear(largo * alto, 3) : '0,000') + ' m²';
+
+    const completo = valor('lote') && valor('nroChapa') && largo && alto;
+    document.getElementById('btnGuardar').disabled = guardando || !completo;
+    return { largo, alto };
+  }
+
+  function verificarDuplicado() {
+    const lote = normalizarCodigo(valor('lote'));
+    const nro = normalizarCodigo(valor('nroChapa'));
+    if (!lote || !nro || !navigator.onLine || !apiConfigurada()) return;
+    llamarApi('duplicado', { lote: lote, nroChapa: nro })
+      .then(resp => {
+        if (!resp || !resp.duplicado) return;
+        if (normalizarCodigo(valor('lote')) !== lote || normalizarCodigo(valor('nroChapa')) !== nro) return;
+        mostrarMensaje('⚠️ Esta chapa ya se registró el ' + resp.fecha + ' (' + resp.usuario + '). Verifique antes de guardar.', 'warn');
+      })
+      .catch(() => {});
+  }
+
+  // ================== Guardado (con cola sin conexión) ==================
+  function guardar() {
+    if (guardando) return;
+    const { largo, alto } = actualizarFormulario();
+    if (!valor('lote') || !valor('nroChapa')) { mostrarMensaje('Faltan lote o nro. de chapa.', 'error'); return; }
+    if (!largo || !alto) { mostrarMensaje('Cargue largo y alto válidos.', 'error'); return; }
+
+    const registro = {
+      pc: normalizarCodigo(valor('pc')),
+      nombre: valor('nombre'),
+      lote: normalizarCodigo(valor('lote')),
+      centro: valor('centro').replace(/\D/g, '') || valor('centro'),
+      nroChapa: normalizarCodigo(valor('nroChapa')),
+      largoM: largo,
+      altoM: alto,
+      qrCompleto: qrActual,
+      usuario: obtenerOperario(),
+      origen: origenDatos + (medidasDelQR && document.getElementById('fuenteLargo').innerText && document.getElementById('fuenteAlto').innerText ? ' · medidas QR' : ' · medidas a mano'),
+      id: generarId(),
+      fechaLectura: new Date().toISOString()
+    };
+
+    guardando = true;
+    const btn = document.getElementById('btnGuardar');
+    btn.disabled = true; btn.innerText = 'GUARDANDO...';
+
+    if (!navigator.onLine || !apiConfigurada()) {
+      encolar(registro);
+      finalizarGuardado(registro, 'PENDIENTE', 'Sin señal: guardada en el teléfono. Se enviará sola al volver la conexión.', 'warn');
+      return;
+    }
+
+    enviarAlServidor(registro)
+      .then(resp => finalizarGuardado(registro, resp.estado,
+        resp.estado === 'OK' ? '✅ Guardada: ' + registro.nroChapa + ' · ' + formatear(resp.m2, 3) + ' m²'
+                             : '✅ Guardada con observaciones: ' + resp.estado,
+        resp.estado === 'OK' ? 'ok' : 'warn'))
+      .catch(err => {
+        encolar(registro);
+        finalizarGuardado(registro, 'PENDIENTE', 'No se pudo enviar (' + err + '). Quedó en el teléfono y se reintentará.', 'warn');
+      });
+  }
+
+  function finalizarGuardado(registro, estado, texto, tipo) {
+    guardando = false;
+    document.getElementById('btnGuardar').innerText = 'GUARDAR';
+    agregarHistorial(registro, estado);
+    const reabrir = ultimaLecturaFueCamara;
+    reiniciar(true);
+    mostrarMensaje(texto, tipo);
+    if (reabrir) {
+      setTimeout(() => iniciarScanner(true), 700);
+    } else {
+      // En modo foto el navegador no deja abrir la cámara solo: se resalta el botón para la próxima
+      resaltarFoto(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  // Envía un pedido a Apps Script. "text/plain" evita el bloqueo CORS de Google.
+  function llamarApi(accion, datos) {
+    const ctrl = new AbortController();
+    const espera = setTimeout(() => ctrl.abort(), 20000);
+    return fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accion: accion, token: API_TOKEN, datos: datos }),
+      redirect: 'follow',
+      signal: ctrl.signal
+    })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .finally(() => clearTimeout(espera));
+  }
+
+  function enviarAlServidor(registro) {
+    return llamarApi('guardar', registro)
+      .catch(e => { throw (e && e.name === 'AbortError') ? 'tiempo de espera agotado' : (e && e.message ? e.message : String(e)); })
+      .then(r => { if (r && r.ok) return r; throw (r && r.mensaje) || 'respuesta inválida'; });
+  }
+
+  function sincronizarPendientes(manual) {
+    if (sincronizando || leerStorage(CLAVE_PENDIENTES).length === 0) return;
+    if (!navigator.onLine || !apiConfigurada()) {
+      if (manual) mostrarMensaje('Sin conexión. Se enviarán al volver la señal.', 'warn');
+      return;
+    }
+    sincronizando = true;
+    let enviadas = 0;
+    const siguiente = () => {
+      const cola = leerStorage(CLAVE_PENDIENTES);
+      if (!cola.length) return terminar();
+      enviarAlServidor(cola[0])
+        .then(r => { quitarDeCola(cola[0].id); actualizarEstadoHistorial(cola[0].id, r.estado); enviadas++; siguiente(); })
+        .catch(terminar);
+    };
+    const terminar = () => {
+      sincronizando = false;
+      actualizarBadgePendientes();
+      const quedan = leerStorage(CLAVE_PENDIENTES).length;
+      if (enviadas) mostrarMensaje('Se enviaron ' + enviadas + ' lectura(s) pendiente(s).' + (quedan ? ' Quedan ' + quedan + '.' : ''), quedan ? 'warn' : 'ok');
+      else if (manual && quedan) mostrarMensaje('No se pudieron enviar. Se reintentará más tarde.', 'warn');
+    };
+    siguiente();
+  }
+
+  function encolar(r) { const c = leerStorage(CLAVE_PENDIENTES); c.push(r); escribirStorage(CLAVE_PENDIENTES, c); actualizarBadgePendientes(); }
+  function quitarDeCola(id) { escribirStorage(CLAVE_PENDIENTES, leerStorage(CLAVE_PENDIENTES).filter(r => r.id !== id)); }
+
+  function actualizarBadgePendientes() {
+    const n = leerStorage(CLAVE_PENDIENTES).length;
+    const b = document.getElementById('btnPendientes');
+    b.innerText = n + (n === 1 ? ' pendiente' : ' pendientes') + ' ↻';
+    b.classList.toggle('visible', n > 0);
+  }
+
+  function actualizarEstadoRed() {
+    const el = document.getElementById('estadoRed');
+    el.innerText = navigator.onLine ? 'En línea' : 'Sin señal';
+    el.classList.toggle('offline', !navigator.onLine);
+  }
+
+  // ================== Historial ==================
+  function agregarHistorial(r, estado) {
+    const h = leerStorage(CLAVE_HISTORIAL);
+    h.unshift({ id: r.id, nroChapa: r.nroChapa, pc: r.pc, lote: r.lote, m2: r.largoM * r.altoM,
+                hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }), estado });
+    escribirStorage(CLAVE_HISTORIAL, h.slice(0, 15));
+    renderHistorial();
+  }
+
+  function actualizarEstadoHistorial(id, estado) {
+    const h = leerStorage(CLAVE_HISTORIAL);
+    h.forEach(x => { if (x.id === id) x.estado = estado; });
+    escribirStorage(CLAVE_HISTORIAL, h); renderHistorial();
+  }
+
+  function renderHistorial() {
+    const cont = document.getElementById('historial');
+    const h = leerStorage(CLAVE_HISTORIAL);
+    cont.innerHTML = '';
+    if (!h.length) { cont.innerHTML = '<div class="hist-item"><small>Sin lecturas todavía.</small></div>'; return; }
+    h.forEach(x => {
+      const fila = document.createElement('div'); fila.className = 'hist-item';
+      const izq = document.createElement('div');
+      const b = document.createElement('b'); b.textContent = (x.nroChapa || '-') + ' · ' + formatear(x.m2, 3) + ' m²';
+      const s = document.createElement('small'); s.textContent = x.hora + ' · Lote ' + (x.lote || '-') + ' · ' + (x.pc || '');
+      izq.appendChild(b); izq.appendChild(s);
+      const tag = document.createElement('span');
+      if (x.estado === 'PENDIENTE') { tag.className = 'tag pend'; tag.textContent = 'PENDIENTE'; }
+      else if (x.estado === 'OK')   { tag.className = 'tag ok';   tag.textContent = 'OK'; }
+      else                          { tag.className = 'tag rev';  tag.textContent = 'REVISAR'; tag.title = x.estado; }
+      fila.appendChild(izq); fila.appendChild(tag); cont.appendChild(fila);
+    });
+  }
+
+  // ================== Reinicio ==================
+  function reiniciar(silencioso) {
+    if (!silencioso) detenerScanner();
+    lecturaEnCurso = false;
+    qrActual = ''; origenDatos = 'MANUAL'; medidasDelQR = false;
+    CAMPOS.concat(['largoM', 'altoM']).forEach(id => {
+      const el = document.getElementById(id);
+      el.value = ''; el.classList.remove('leido', 'invalido');
+    });
+    ['avisoLargo', 'avisoAlto', 'fuenteLargo', 'fuenteAlto'].forEach(id => document.getElementById(id).innerText = '');
+    document.getElementById('qrCompleto').innerText = '-';
+    document.getElementById('qrManual').value = '';
+    actualizarFormulario();
+    if (!silencioso) {
+      mostrarMensaje('Escanee el QR o complete los datos a mano.', 'info');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  // ================== Utilidades ==================
+  function avisoLectura() {
+    try { if (navigator.vibrate) navigator.vibrate(150); } catch (e) {}
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 1200; g.gain.value = 0.15;
+      o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.12);
+    } catch (e) {}
+  }
+
+  function mostrarMensaje(texto, tipo) {
+    const m = document.getElementById('mensaje');
+    m.innerText = texto; m.className = 'estado ' + (tipo || 'ok');
+  }
+
+  function formatear(n, dec) {
+    return Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  }
+
+  function generarId() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function apiConfigurada() { return /^https:\/\/script\.google\.com\/.+\/exec/.test(API_URL); }
+  function leerStorage(k) { try { return JSON.parse(localStorage.getItem(k)) || []; } catch (e) { return []; } }
+  function escribirStorage(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  // ================== Operario ==================
+  function obtenerOperario() { try { return localStorage.getItem(CLAVE_OPERARIO) || ''; } catch (e) { return ''; } }
+  function mostrarOperario() { document.getElementById('nombreOperario').innerText = obtenerOperario() || '-'; }
+
+  function pedirOperario() {
+    const input = document.getElementById('inputOperario');
+    input.value = obtenerOperario();
+    document.getElementById('modalOperario').classList.remove('oculto');
+    setTimeout(() => input.focus(), 200);
+  }
+
+  function guardarOperario() {
+    const input = document.getElementById('inputOperario');
+    const nombre = input.value.trim().replace(/\s+/g, ' ');
+    if (nombre.length < 2) { input.classList.add('invalido'); input.focus(); return; }
+    input.classList.remove('invalido');
+    try { localStorage.setItem(CLAVE_OPERARIO, nombre); } catch (e) {}
+    mostrarOperario();
+    document.getElementById('modalOperario').classList.add('oculto');
+    if (!scannerActivo) verificarPermisoCamara();
+  }
+
+  // ================== App instalable / sin señal ==================
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
